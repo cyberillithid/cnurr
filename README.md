@@ -16,7 +16,10 @@ Default export of old EtherPad completely misses the changes and, most important
 
 ## Roadmap
 
-- usage without admin access
-- in-app authorization
+- chats
+- standalone pads (non-team)
+- titanpad / sync.in
+- batch processing
+- referrals (from /latest -> links?)
 - ???
 - HYADESPAD
