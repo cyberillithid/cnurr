@@ -16,10 +16,6 @@ Default export of old EtherPad completely misses the changes and, most important
 
 ## Roadmap
 
-- chats
-- standalone pads (non-team)
-- titanpad / sync.in
-- batch processing
-- referrals (from /latest -> links?)
+- passwords
 - ???
 - HYADESPAD
