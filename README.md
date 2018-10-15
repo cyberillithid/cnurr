@@ -14,8 +14,6 @@ As of now, more and more servers hosting [old EtherPad](https://github.com/ether
 
 Default export of old EtherPad completely misses the changes and, most importantly, author data.
 
-## Roadmap
+**What of passworded pads?**
 
-- passwords
-- ???
-- HYADESPAD
+I'm not totally sure, but it looks that either entered password is connected to the username, not the cookie set, or that admin access to the 'restore pad' somehow circumvents password requirements.

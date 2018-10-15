@@ -21,6 +21,7 @@ class CnurrDomain:
         """Constructor for domain"""
         self.domain = domain
         loc = domain.split('/')
+        self.ctx = ssl._create_unverified_context()
         if loc[0] == 'http:':
             self.use_ssl = False
         else:
@@ -29,9 +30,8 @@ class CnurrDomain:
         self._make_cookie()
     def _make_cookie(self) -> None:
         """Creates cookies, required by old EtherPad"""
-        ctx = ssl._create_unverified_context()
         if self.use_ssl:
-            conn = http.client.HTTPSConnection(self.hostname, context=ctx)
+            conn = http.client.HTTPSConnection(self.hostname, context=self.ctx)
         else:
             conn = http.client.HTTPConnection(self.hostname)
         conn.request('GET', '')
@@ -45,7 +45,7 @@ class CnurrDomain:
         if redir is not None:
             redir_loc = redir_resp.getheader('Location').split('/')
             if redir_loc[0] == 'https:':
-                conn_team = http.client.HTTPSConnection(redir_loc[2], context=ctx)
+                conn_team = http.client.HTTPSConnection(redir_loc[2], context=self.ctx)
             else:
                 conn_team = http.client.HTTPConnection(redir_loc[2])
             conn_team.request('GET', '/' + '/'.join(redir_loc[3:]))
@@ -59,9 +59,8 @@ class CnurrDomain:
         self.cookie = ''.join(cookie_list)
     def _fetch(self, addr: str) -> str:
         """Fetches requested addr from current domain"""
-        ctx = ssl._create_unverified_context()
         req = request.Request(self.domain + addr, headers={'Cookie': self.cookie})
-        return request.urlopen(req, context=ctx).read().decode('utf-8')
+        return request.urlopen(req, context=self.ctx).read().decode('utf-8')
     def fetch_pad(self, pad: str, startrev: int, granularity: int) -> str:
         """Fetches selected pad changeset from startrev with granularity"""
         print(pad, startrev, ', g =', granularity)
@@ -88,17 +87,28 @@ class CnurrTeamDomain(CnurrDomain):
     def __init__(self, domain: str, username: str, password: str) -> None:
         super().__init__(domain)
         # -- auth --
-        ctx = ssl._create_unverified_context()
         post_data = {'email': username, 'password': password}
         datum = parse.urlencode(post_data).encode('utf-8')
         req = request.Request(self.domain + '/ep/account/sign-in?undefined',
                               headers={'Cookie': self.cookie})
-        request.urlopen(req, data=datum, context=ctx) # res -> 'ASIE=F'
+        request.urlopen(req, data=datum, context=self.ctx) # res -> 'ASIE=F'
         self.cookie += 'ASIE=F'
     def get_padlist(self) -> list:
         """Returns list of all now-existing pads"""
         page = self._fetch('/ep/padlist/all-pads')
         return re.findall(r'"title first"><a href="/(.*)">(.*)</a', page)
+    def admin_maxrev(self, pad: str) -> int:
+        link = 'ep/admin/recover-padtext?localPadId=' + pad
+        maxrev_page = self._fetch(link)
+        maxrev = (re.findall(r'value="([0-9]*)" name="revNum"', maxrev_page))[0]
+        return int(maxrev)
+    def get_htm(self, pad: str, rev: int) -> str:
+        link = 'ep/admin/recover-padtext?localPadId=' + pad
+        print(pad, '@', rev)
+        link += '&revNum=' + rev
+        res_page = self._fetch(link)
+        # FUTURE: wrap
+        return res_page
 
 def create_index(savedir: str, domain: str, padlist: list) -> list:
     """Creates INDEX file with titles of pads"""
@@ -117,6 +127,8 @@ def main(inargs=None):
                        )
     parser.add_argument('-r', '--recursive', action='store_true',
                         help='Additionally process all of referred pad links on the same domain')
+    parser.add_argument('-a', '--admin', action='store_true',
+                        help='Additionally process all of unaccessible pads as admin')
     parser.add_argument('-t', '--team', nargs=2, metavar=('EMAIL', 'PASSWORD'),
                         help='Login to team pad site with EMAIL and PASSWORD and download all pads')
     parser.add_argument('-o', '--outdir', default='pads')
@@ -133,13 +145,17 @@ def main(inargs=None):
     savedir = args.outdir + '/' + domain.hostname
     if not os.path.exists(savedir):
         os.makedirs(savedir)
-    save_all_pads(args, domain, savedir, args.pads)
+    fails = save_all_pads(args, domain, savedir, args.pads)
+    if args.admin:
+        save_admin_pads(args, domain, savedir, fails)
 
-def save_all_pads(args, domain, savedir, padlist, oldpadlist = []) -> list:
+def save_all_pads(args, domain: CnurrDomain, savedir, padlist, oldpadlist=[]) -> list:
     """Saves all pads; even recursively"""
     forbidden = []
     rec = []
+    idx = 0
     for pad in padlist:
+        idx += 1
         try:
             maxrev = domain.max_rev(pad)
         except error.HTTPError:
@@ -150,28 +166,46 @@ def save_all_pads(args, domain, savedir, padlist, oldpadlist = []) -> list:
             continue
         if args.fine:
             jsons = []
-            for i in range(0, maxrev, 100):
-                jsons.append(domain.fetch_pad(pad, i, 1))
+            for i in range(0, maxrev, 1000):
+                jsons.append(domain.fetch_pad(pad, i, 10))
             json = '[' + ', '.join(jsons) + ']'
-        elif args.recursive:
-            json = domain.fetch_pad(pad, 0, (maxrev)+1)
         else:
             json = domain.fetch_pad(pad, 0, (maxrev // 100) + 1)
-        padfile = open(savedir + '/' + pad + '.json', 'w', encoding='utf-8')
+        padfile = open(savedir + '/' + pad + '.' + str(idx) + '.json', 'w', encoding='utf-8')
         padfile.write(json)
         padfile.close()
-        chatfile = open(savedir + '/' + pad + '.chat.json', 'w', encoding='utf-8')
+        chatfile = open(savedir + '/' + pad + '.' + str(idx) + '.chat.json', 'w', encoding='utf-8')
         chatjson = domain.fetch_chat(pad)
         chatfile.write(chatjson)
         chatfile.close()
         if args.recursive:
+            json = domain.fetch_pad(pad, 0, (maxrev)+1)
             reccur = re.findall(domain.domain + r'/([A-Za-z0-9._\-]*)', json)
             rec += reccur
     prevset = set(padlist) | set(oldpadlist)
     setrec = set(rec) - prevset
     if setrec:
-        save_all_pads(args, domain, savedir, list(setrec), list(prevset))
+        forbidden.append(save_all_pads(args, domain, savedir, list(setrec), list(prevset)))
     return forbidden
+
+def save_admin_pads(args, domain: CnurrTeamDomain, savedir, padlist) -> list:
+    """Saves pads using admin"""
+    rec = []
+    idx = 0
+    for pad in padlist:
+        idx += 1
+        maxrev = domain.admin_maxrev(pad)
+        j = maxrev
+        txt = domain.latest_htm(pad, j)
+        padfile = open(savedir + '/' + '.'.join([pad, str(idx), str(j), 'htm']), 'w', encoding='utf-8')
+        padfile.write(txt)
+        padfile.close()
+        for j in range(0, maxrev, (maxrev//4)+1):
+            txt = domain.latest_htm(pad, j)
+            padfile = open(savedir + '/' + '.'.join([pad, str(idx), str(j), 'htm']), 'w', encoding='utf-8')
+            padfile.write(txt)
+            padfile.close()
+    return
 
 if __name__ == '__main__':
     # run as standalone executable
