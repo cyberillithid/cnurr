@@ -6,7 +6,20 @@ As of now, more and more servers hosting [old EtherPad](https://github.com/ether
 
 ## Usage
 
-(to be written here)
+You can use it from commandline or by writing your `input.txt`.
+
+My `input.txt` looks like:
+
+```sh
+# Domains
+-t user@name.com password https://domain.titanpad.com
+-a -f -t user@name.com password https://domain.piratenpad.de
+# Standalone pads
+-r http://sync.in pad_1
+https://teams.piratenpad.de pad_2 pad_3
+```
+
+`python cnurr.py -h` shows you help.
 
 ## SAQ (Supposedly Askable Questions)
 
